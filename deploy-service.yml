@@ -1,0 +1,59 @@
+name: Deploy Service
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+      app_runner_arn:
+        required: true
+        type: string
+      tests_command:
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rodar testes
+        if: ${{ inputs.tests_command != '' }}
+        run: ${{ inputs.tests_command }}
+
+      - name: Definir TAG com hash do commit
+        id: vars
+        run: echo "TAG=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Login no ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+          | docker login --username AWS \
+            --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Build Docker
+        run: |
+          docker build -f ${{ inputs.dockerfile }} \
+            -t ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} .
+
+      - name: Tag + Push para o ECR
+        run: |
+          docker tag ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }}
+
+          docker push \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }}
+
+      - name: Deploy App Runner
+        run: |
+          aws apprunner update-service \
+          --service-arn "${{ inputs.app_runner_arn }}" \
+          --source-configuration "ImageRepository={ImageIdentifier=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }},ImageRepositoryType=ECR}"
