@@ -1,0 +1,28 @@
+name: Validate Service
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile:
+        required: true
+        type: string
+      tests_command:
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        if: ${{ inputs.tests_command != '' }}
+        run: ${{ inputs.tests_command }}
+
+      - name: Build Docker image
+        run: |
+          docker build -f ${{ inputs.dockerfile }} -t temp-image:latest .
