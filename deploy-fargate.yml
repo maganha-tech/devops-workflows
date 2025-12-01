@@ -1,0 +1,465 @@
+name: Deploy to ECS Fargate
+
+on:
+  workflow_call:
+    inputs:
+      service_name:
+        required: true
+        type: string
+      cluster_name:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+      task_cpu:
+        required: false
+        type: string
+        default: "512"
+      task_memory:
+        required: false
+        type: string
+        default: "1024"
+      deployment_type:
+        required: false
+        type: string
+        default: "service" # 'service' or 'scheduled'
+      schedule_expression:
+        required: false
+        type: string
+        default: "" # e.g., "rate(1 hour)" or "cron(0 12 * * ? *)"
+      tests_command:
+        required: false
+        default: ""
+        type: string
+      use_default_vpc:
+        required: false
+        type: boolean
+        default: true
+      subnets:
+        required: false
+        type: string # Comma-separated subnet IDs (if not using default VPC)
+      security_groups:
+        required: false
+        type: string # Comma-separated security group IDs (optional)
+    secrets:
+      AWS_REGION:
+        required: true
+      AWS_ACCOUNT_ID:
+        required: true
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      # Secret environment variables for the container
+      SQL_HOST:
+        required: false
+      SQL_PORT:
+        required: false
+      SQL_DATABASE:
+        required: false
+      SQL_USERNAME:
+        required: false
+      SQL_PASSWORD:
+        required: false
+      TARGET_API_URL:
+        required: false
+      TARGET_API_KEY:
+        required: false
+      TARGET_API_RPS:
+        required: false
+      TARGET_API_VERSION:
+        required: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Run tests
+        if: ${{ inputs.tests_command != '' }}
+        run: ${{ inputs.tests_command }}
+
+      - name: Define TAG with commit hash
+        id: vars
+        run: |
+          echo "TAG=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "TIMESTAMP=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Login to ECR
+        run: |
+          aws ecr get-login-password --region ${{ secrets.AWS_REGION }} \
+          | docker login --username AWS \
+            --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com
+
+      - name: Create ECR repository if not exists
+        run: |
+          aws ecr describe-repositories --repository-names ${{ inputs.service_name }} \
+            --region ${{ secrets.AWS_REGION }} 2>/dev/null || \
+          aws ecr create-repository --repository-name ${{ inputs.service_name }} \
+            --region ${{ secrets.AWS_REGION }}
+
+      - name: Build Docker image
+        run: |
+          docker build -f ${{ inputs.dockerfile }} \
+            -t ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} \
+            -t ${{ inputs.service_name }}:latest .
+
+      - name: Tag and Push to ECR
+        run: |
+          ECR_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ inputs.service_name }}
+          
+          docker tag ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} ${ECR_URI}:${{ steps.vars.outputs.TAG }}
+          docker tag ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} ${ECR_URI}:latest
+          
+          docker push ${ECR_URI}:${{ steps.vars.outputs.TAG }}
+          docker push ${ECR_URI}:latest
+          
+          echo "IMAGE_URI=${ECR_URI}:latest" >> $GITHUB_ENV
+
+      - name: Get network configuration
+        id: network
+        run: |
+          if [ "${{ inputs.use_default_vpc }}" = "true" ]; then
+            echo "Using default VPC..."
+            VPC_ID=$(aws ec2 describe-vpcs \
+              --filters "Name=isDefault,Values=true" \
+              --query "Vpcs[0].VpcId" \
+              --output text \
+              --region ${{ secrets.AWS_REGION }})
+            
+            SUBNETS=$(aws ec2 describe-subnets \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query "Subnets[*].SubnetId" \
+              --output text \
+              --region ${{ secrets.AWS_REGION }} | tr '\t' ',')
+            
+            echo "SUBNETS=$SUBNETS" >> $GITHUB_OUTPUT
+            echo "Using subnets: $SUBNETS"
+          else
+            echo "SUBNETS=${{ inputs.subnets }}" >> $GITHUB_OUTPUT
+            echo "Using provided subnets: ${{ inputs.subnets }}"
+          fi
+          
+          if [ -n "${{ inputs.security_groups }}" ]; then
+            echo "SECURITY_GROUPS=${{ inputs.security_groups }}" >> $GITHUB_OUTPUT
+          else
+            echo "SECURITY_GROUPS=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Prepare environment variables
+        id: env_vars
+        run: |
+          # Build environment variables array
+          ENV_VARS='[]'
+          
+          # Add environment variables from secrets
+          if [ -n "${{ secrets.SQL_HOST }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_HOST","value":"${{ secrets.SQL_HOST }}"}]')
+          fi
+          if [ -n "${{ secrets.SQL_PORT }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_PORT","value":"${{ secrets.SQL_PORT }}"}]')
+          fi
+          if [ -n "${{ secrets.SQL_DATABASE }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_DATABASE","value":"${{ secrets.SQL_DATABASE }}"}]')
+          fi
+          if [ -n "${{ secrets.SQL_USERNAME }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_USERNAME","value":"${{ secrets.SQL_USERNAME }}"}]')
+          fi
+          if [ -n "${{ secrets.SQL_PASSWORD }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_PASSWORD","value":"${{ secrets.SQL_PASSWORD }}"}]')
+          fi
+          if [ -n "${{ secrets.TARGET_API_URL }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_URL","value":"${{ secrets.TARGET_API_URL }}"}]')
+          fi
+          if [ -n "${{ secrets.TARGET_API_KEY }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_KEY","value":"${{ secrets.TARGET_API_KEY }}"}]')
+          fi
+          if [ -n "${{ secrets.TARGET_API_RPS }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_RPS","value":"${{ secrets.TARGET_API_RPS }}"}]')
+          fi
+          if [ -n "${{ secrets.TARGET_API_VERSION }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TAGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"}]')
+          fi
+          
+          echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
+          echo "$ENV_VARS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get IAM role ARNs
+        id: roles
+        run: |
+          EXECUTION_ROLE_ARN=$(aws iam get-role \
+            --role-name ecsTaskExecutionRole \
+            --query "Role.Arn" \
+            --output text)
+          
+          TASK_ROLE_ARN=$(aws iam get-role \
+            --role-name CRMServiceTaskRole \
+            --query "Role.Arn" \
+            --output text)
+          
+          echo "EXECUTION_ROLE_ARN=$EXECUTION_ROLE_ARN" >> $GITHUB_OUTPUT
+          echo "TASK_ROLE_ARN=$TASK_ROLE_ARN" >> $GITHUB_OUTPUT
+          
+          echo "Execution Role: $EXECUTION_ROLE_ARN"
+          echo "Task Role: $TASK_ROLE_ARN"
+
+      - name: Create CloudWatch Log Group
+        run: |
+          aws logs create-log-group \
+            --log-group-name /ecs/${{ inputs.service_name }} \
+            --region ${{ secrets.AWS_REGION }} 2>/dev/null || true
+          
+          aws logs put-retention-policy \
+            --log-group-name /ecs/${{ inputs.service_name }} \
+            --retention-in-days 30 \
+            --region ${{ secrets.AWS_REGION }} 2>/dev/null || true
+
+      - name: Register ECS task definition
+        id: taskdef
+        run: |
+          TASK_DEF=$(jq -n \
+            --arg family "${{ inputs.service_name }}-task" \
+            --arg taskRoleArn "${{ steps.roles.outputs.TASK_ROLE_ARN }}" \
+            --arg executionRoleArn "${{ steps.roles.outputs.EXECUTION_ROLE_ARN }}" \
+            --arg cpu "${{ inputs.task_cpu }}" \
+            --arg memory "${{ inputs.task_memory }}" \
+            --arg image "${{ env.IMAGE_URI }}" \
+            --arg serviceName "${{ inputs.service_name }}" \
+            --arg region "${{ secrets.AWS_REGION }}" \
+            --argjson environment '${{ steps.env_vars.outputs.ENV_VARS }}' \
+            '{
+              family: $family,
+              taskRoleArn: $taskRoleArn,
+              executionRoleArn: $executionRoleArn,
+              networkMode: "awsvpc",
+              requiresCompatibilities: ["FARGATE"],
+              cpu: $cpu,
+              memory: $memory,
+              containerDefinitions: [{
+                name: $serviceName,
+                image: $image,
+                essential: true,
+                environment: $environment,
+                logConfiguration: {
+                  logDriver: "awslogs",
+                  options: {
+                    "awslogs-group": ("/ecs/" + $serviceName),
+                    "awslogs-region": $region,
+                    "awslogs-stream-prefix": "ecs",
+                    "awslogs-create-group": "true"
+                  }
+                }
+              }]
+            }')
+          
+          echo "$TASK_DEF" | jq '.' > taskdef.json
+          
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://taskdef.json \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+          echo "✅ Registered task definition: $TASK_DEF_ARN"
+
+      - name: Update or Create ECS Service
+        if: inputs.deployment_type == 'service'
+        run: |
+          # Build network configuration
+          NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ steps.network.outputs.SUBNETS }}]"
+          
+          if [ -n "${{ steps.network.outputs.SECURITY_GROUPS }}" ]; then
+            NETWORK_CONFIG="${NETWORK_CONFIG},securityGroups=[${{ steps.network.outputs.SECURITY_GROUPS }}]"
+          fi
+          
+          NETWORK_CONFIG="${NETWORK_CONFIG},assignPublicIp=ENABLED}"
+          
+          # Check if service exists
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "${{ inputs.cluster_name }}" \
+            --services "${{ inputs.service_name }}" \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'services[0].status' \
+            --output text 2>/dev/null || echo "NONE")
+          
+          if [ "$SERVICE_STATUS" = "ACTIVE" ]; then
+            echo "Updating existing service..."
+            aws ecs update-service \
+              --cluster "${{ inputs.cluster_name }}" \
+              --service "${{ inputs.service_name }}" \
+              --task-definition "${{ steps.taskdef.outputs.TASK_DEF_ARN }}" \
+              --force-new-deployment \
+              --region ${{ secrets.AWS_REGION }}
+          else
+            echo "Creating new service..."
+            aws ecs create-service \
+              --cluster "${{ inputs.cluster_name }}" \
+              --service-name "${{ inputs.service_name }}" \
+              --task-definition "${{ steps.taskdef.outputs.TASK_DEF_ARN }}" \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --network-configuration "$NETWORK_CONFIG" \
+              --region ${{ secrets.AWS_REGION }}
+          fi
+
+      - name: Create/Update EventBridge Scheduled Task
+        if: inputs.deployment_type == 'scheduled'
+        run: |
+          RULE_NAME="${{ inputs.service_name }}-schedule"
+          TARGET_ID="${{ inputs.service_name }}-target"
+          
+          # Create EventBridge role if it doesn't exist
+          EVENTBRIDGE_ROLE_ARN=$(aws iam get-role \
+            --role-name eventBridgeECSRole \
+            --query "Role.Arn" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$EVENTBRIDGE_ROLE_ARN" ]; then
+            echo "Creating EventBridge role..."
+            
+            cat > trust-policy.json << 'EOF'
+          {
+            "Version": "2012-10-17",
+            "Statement": [{
+              "Effect": "Allow",
+              "Principal": {"Service": "events.amazonaws.com"},
+              "Action": "sts:AssumeRole"
+            }]
+          }
+          EOF
+            
+            aws iam create-role \
+              --role-name eventBridgeECSRole \
+              --assume-role-policy-document file://trust-policy.json
+            
+            aws iam put-role-policy \
+              --role-name eventBridgeECSRole \
+              --policy-name ECSRunTaskPolicy \
+              --policy-document '{
+                "Version": "2012-10-17",
+                "Statement": [
+                  {
+                    "Effect": "Allow",
+                    "Action": ["ecs:RunTask"],
+                    "Resource": "*"
+                  },
+                  {
+                    "Effect": "Allow",
+                    "Action": "iam:PassRole",
+                    "Resource": ["*"]
+                  }
+                ]
+              }'
+            
+            EVENTBRIDGE_ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/eventBridgeECSRole"
+            sleep 10
+          fi
+          
+          # Create or update EventBridge rule
+          aws events put-rule \
+            --name "$RULE_NAME" \
+            --schedule-expression "${{ inputs.schedule_expression }}" \
+            --state ENABLED \
+            --region ${{ secrets.AWS_REGION }}
+          
+          # Prepare network configuration
+          SUBNETS_ARRAY=$(echo "${{ steps.network.outputs.SUBNETS }}" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+          
+          if [ -n "${{ steps.network.outputs.SECURITY_GROUPS }}" ]; then
+            SG_ARRAY=$(echo "${{ steps.network.outputs.SECURITY_GROUPS }}" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$"; ""))')
+            NETWORK_CONFIG=$(jq -n \
+              --argjson subnets "$SUBNETS_ARRAY" \
+              --argjson sgs "$SG_ARRAY" \
+              '{awsvpcConfiguration: {subnets: $subnets, securityGroups: $sgs, assignPublicIp: "ENABLED"}}')
+          else
+            NETWORK_CONFIG=$(jq -n \
+              --argjson subnets "$SUBNETS_ARRAY" \
+              '{awsvpcConfiguration: {subnets: $subnets, assignPublicIp: "ENABLED"}}')
+          fi
+          
+          # Create target configuration
+          TARGETS=$(jq -n \
+            --arg id "$TARGET_ID" \
+            --arg arn "arn:aws:ecs:${{ secrets.AWS_REGION }}:${{ secrets.AWS_ACCOUNT_ID }}:cluster/${{ inputs.cluster_name }}" \
+            --arg roleArn "$EVENTBRIDGE_ROLE_ARN" \
+            --arg taskDef "${{ steps.taskdef.outputs.TASK_DEF_ARN }}" \
+            --argjson networkConfig "$NETWORK_CONFIG" \
+            '[{
+              Id: $id,
+              Arn: $arn,
+              RoleArn: $roleArn,
+              EcsParameters: {
+                TaskDefinitionArn: $taskDef,
+                TaskCount: 1,
+                LaunchType: "FARGATE",
+                NetworkConfiguration: $networkConfig,
+                PlatformVersion: "LATEST"
+              }
+            }]')
+          
+          echo "$TARGETS" > targets.json
+          aws events put-targets \
+            --rule "$RULE_NAME" \
+            --targets file://targets.json \
+            --region ${{ secrets.AWS_REGION }}
+          
+          echo "✅ Scheduled task created/updated: $RULE_NAME"
+          echo "Schedule: ${{ inputs.schedule_expression }}"
+
+      - name: Wait for service deployment
+        if: inputs.deployment_type == 'service'
+        run: |
+          echo "Waiting for service deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster "${{ inputs.cluster_name }}" \
+            --services "${{ inputs.service_name }}" \
+            --region ${{ secrets.AWS_REGION }}
+          echo "✅ Deployment completed successfully!"
+
+      - name: Get service information
+        if: inputs.deployment_type == 'service'
+        run: |
+          echo "📊 Service Status:"
+          aws ecs describe-services \
+            --cluster "${{ inputs.cluster_name }}" \
+            --services "${{ inputs.service_name }}" \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'services[0].[serviceName,status,runningCount,desiredCount]' \
+            --output table
+
+      - name: Display deployment summary
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✅ Deployment Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Service: ${{ inputs.service_name }}"
+          echo "Cluster: ${{ inputs.cluster_name }}"
+          echo "Task Definition: ${{ steps.taskdef.outputs.TASK_DEF_ARN }}"
+          echo "Image: ${{ env.IMAGE_URI }}"
+          echo "Type: ${{ inputs.deployment_type }}"
+          if [ "${{ inputs.deployment_type }}" = "scheduled" ]; then
+            echo "Schedule: ${{ inputs.schedule_expression }}"
+          fi
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo ""
+          echo "📝 View logs:"
+          echo "aws logs tail /ecs/${{ inputs.service_name }} --follow --region ${{ secrets.AWS_REGION }}"
