@@ -70,6 +70,13 @@ on:
         required: false
       TARGET_API_VERSION:
         required: false
+      ENABLE_LEAD_NOTES:
+        required: false
+      ENABLED_USERS:
+        required: false
+      COMPANY_ID_FIELD:
+        required: false
+
 
 jobs:
   deploy:
