@@ -70,6 +70,12 @@ on:
         required: false
       TARGET_API_VERSION:
         required: false
+      ENABLE_LEAD_NOTES:
+        required: false
+      COMPANY_ID_FIELD:
+        required: false
+      ENABLED_USERS:
+        required: false
 
 jobs:
   deploy:
@@ -196,6 +202,15 @@ jobs:
           fi
           if [ -n "${{ secrets.TARGET_API_VERSION }}" ]; then
             ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TAGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"}]')
+          fi
+          if [ -n "${{ secrets.ENABLE_LEAD_NOTES }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"ENABLE_LEAD_NOTES","value":"${{ secrets.ENABLE_LEAD_NOTES }}"}]')
+          fi
+          if [ -n "${{ secrets.COMPANY_ID_FIELD }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"}]')
+          fi
+          if [ -n "${{ secrets.ENABLED_USERS }}" ]; then
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"ENABLED_USERS","value":"${{ secrets.ENABLED_USERS }}"}]')
           fi
           
           echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
