@@ -70,12 +70,6 @@ on:
         required: false
       TARGET_API_VERSION:
         required: false
-      ENABLE_LEAD_NOTES:
-        required: false
-      COMPANY_ID_FIELD:
-        required: false
-      ENABLED_USERS:
-        required: false
 
 jobs:
   deploy:
@@ -342,52 +336,23 @@ jobs:
           RULE_NAME="${{ inputs.service_name }}-schedule"
           TARGET_ID="${{ inputs.service_name }}-target"
           
-          # Create EventBridge role if it doesn't exist
+          # Get EventBridge role (must exist - create with PowerShell script first)
           EVENTBRIDGE_ROLE_ARN=$(aws iam get-role \
             --role-name eventBridgeECSRole \
             --query "Role.Arn" \
             --output text 2>/dev/null || echo "")
           
           if [ -z "$EVENTBRIDGE_ROLE_ARN" ]; then
-            echo "Creating EventBridge role..."
-            
-            cat > trust-policy.json << 'EOF'
-          {
-            "Version": "2012-10-17",
-            "Statement": [{
-              "Effect": "Allow",
-              "Principal": {"Service": "events.amazonaws.com"},
-              "Action": "sts:AssumeRole"
-            }]
-          }
-          EOF
-            
-            aws iam create-role \
-              --role-name eventBridgeECSRole \
-              --assume-role-policy-document file://trust-policy.json
-            
-            aws iam put-role-policy \
-              --role-name eventBridgeECSRole \
-              --policy-name ECSRunTaskPolicy \
-              --policy-document '{
-                "Version": "2012-10-17",
-                "Statement": [
-                  {
-                    "Effect": "Allow",
-                    "Action": ["ecs:RunTask"],
-                    "Resource": "*"
-                  },
-                  {
-                    "Effect": "Allow",
-                    "Action": "iam:PassRole",
-                    "Resource": ["*"]
-                  }
-                ]
-              }'
-            
-            EVENTBRIDGE_ROLE_ARN="arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/eventBridgeECSRole"
-            sleep 10
+            echo "❌ ERROR: EventBridge role not found!"
+            echo "Please create the eventBridgeECSRole first by running:"
+            echo "  .\create-eventbridge-role.ps1"
+            echo ""
+            echo "Or create it manually with AWS CLI:"
+            echo "  aws iam create-role --role-name eventBridgeECSRole --assume-role-policy-document file://trust-policy.json"
+            exit 1
           fi
+          
+          echo "✅ Using EventBridge role: $EVENTBRIDGE_ROLE_ARN"
           
           # Create or update EventBridge rule
           aws events put-rule \
@@ -404,11 +369,11 @@ jobs:
             NETWORK_CONFIG=$(jq -n \
               --argjson subnets "$SUBNETS_ARRAY" \
               --argjson sgs "$SG_ARRAY" \
-              '{awsvpcConfiguration: {subnets: $subnets, securityGroups: $sgs, assignPublicIp: "ENABLED"}}')
+              '{awsvpcConfiguration: {Subnets: $subnets, SecurityGroups: $sgs, AssignPublicIp: "ENABLED"}}')
           else
             NETWORK_CONFIG=$(jq -n \
               --argjson subnets "$SUBNETS_ARRAY" \
-              '{awsvpcConfiguration: {subnets: $subnets, assignPublicIp: "ENABLED"}}')
+              '{awsvpcConfiguration: {Subnets: $subnets, AssignPublicIp: "ENABLED"}}')
           fi
           
           # Create target configuration
