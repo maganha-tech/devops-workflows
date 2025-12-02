@@ -222,6 +222,7 @@ jobs:
             --retention-in-days 30 \
             --region ${{ secrets.AWS_REGION }} 2>/dev/null || true
 
+      
       - name: Register ECS task definition
         id: taskdef
         run: |
@@ -234,7 +235,7 @@ jobs:
             --arg image "${{ env.IMAGE_URI }}" \
             --arg serviceName "${{ inputs.service_name }}" \
             --arg region "${{ secrets.AWS_REGION }}" \
-            --argjson environment '${{ steps.env_vars.outputs.ENV_VARS }}' \
+            --arg environment '${{ steps.env_vars.outputs.ENV_VARS }}' \   # ← changed from --argjson to --arg
             '{
               family: $family,
               taskRoleArn: $taskRoleArn,
@@ -247,7 +248,7 @@ jobs:
                 name: $serviceName,
                 image: $image,
                 essential: true,
-                environment: $environment,
+                environment: ($environment | fromjson),   # ← this converts the string back to proper array
                 logConfiguration: {
                   logDriver: "awslogs",
                   options: {
@@ -259,17 +260,17 @@ jobs:
                 }
               }]
             }')
-          
+
           echo "$TASK_DEF" | jq '.' > taskdef.json
-          
+
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.json \
             --region ${{ secrets.AWS_REGION }} \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
-          
+
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
-          echo "✅ Registered task definition: $TASK_DEF_ARN"
+          echo "Registered task definition: $TASK_DEF_ARN"
 
       - name: Update or Create ECS Service
         if: inputs.deployment_type == 'service'
