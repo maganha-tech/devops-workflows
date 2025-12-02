@@ -170,7 +170,7 @@ jobs:
             echo "SECURITY_GROUPS=" >> $GITHUB_OUTPUT
           fi
 
-            - name: Prepare environment variables
+      - name: Prepare environment variables
         id: env_vars
         run: |
           ENV_VARS='[]'
