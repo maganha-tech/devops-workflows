@@ -186,11 +186,11 @@ jobs:
             {"name":"ENABLE_LEAD_NOTES","value":"${{ secrets.ENABLE_LEAD_NOTES }}"},
             {"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"},
             {"name":"ENABLED_USERS","value":${{ secrets.ENABLED_USERS }}}
-          ]' > env.json
+          ]' > env-raw.json
 
-          jq -c 'map(select(.value != "" and .value != null))' env.json > final.json
+          jq -c 'map(.value |= tostring)' env-raw.json > env-final.json
 
-          echo "ENV_VARS=$(cat final.json)" >> $GITHUB_OUTPUT
+          echo "ENV_VARS=$(cat env-final.json)" >> $GITHUB_OUTPUT
 
       - name: Get IAM role ARNs
         id: roles
@@ -235,34 +235,32 @@ jobs:
             "requiresCompatibilities": ["FARGATE"],
             "cpu": "${{ inputs.task_cpu }}",
             "memory": "${{ inputs.task_memory }}",
-            "containerDefinitions": [
-              {
-                "name": "${{ inputs.service_name }}",
-                "image": "${{ env.IMAGE_URI }}",
-                "essential": true,
-                "environment": ${{ steps.env_vars.outputs.ENV_VARS }},
-                "logConfiguration": {
-                  "logDriver": "awslogs",
-                  "options": {
-                    "awslogs-group": "/ecs/${{ inputs.service_name }}",
-                    "awslogs-region": "${{ secrets.AWS_REGION }}",
-                    "awslogs-stream-prefix": "ecs",
-                    "awslogs-create-group": "true"
-                  }
+            "containerDefinitions": [{
+              "name": "${{ inputs.service_name }}",
+              "image": "${{ env.IMAGE_URI }}",
+              "essential": true,
+              "environment": ${{ steps.env_vars.outputs.ENV_VARS }},
+              "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                  "awslogs-group": "/ecs/${{ inputs.service_name }}",
+                  "awslogs-region": "${{ secrets.AWS_REGION }}",
+                  "awslogs-stream-prefix": "ecs",
+                  "awslogs-create-group": "true"
                 }
               }
-            ]
+            }]
           }
           EOF
 
-          TASK_DEF_ARN=$(aws ecs register-task-definition \
+          aws ecs register-task-definition \
             --cli-input-json file://taskdef.json \
             --region ${{ secrets.AWS_REGION }} \
             --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
+            --output text \
+            | tee taskdef-arn.txt
 
-          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
-          echo "Registered task definition: $TASK_DEF_ARN"
+          echo "TASK_DEF_ARN=$(cat taskdef-arn.txt)" >> $GITHUB_OUTPUT
 
       - name: Update or Create ECS Service
         if: inputs.deployment_type == 'service'
