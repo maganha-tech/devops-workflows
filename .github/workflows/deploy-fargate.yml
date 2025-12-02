@@ -211,28 +211,25 @@ jobs:
             ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"}]')
           fi
 
-          RAW="${{ secrets.ENABLED_USERS }}"
-          if [ -n "$RAW" ]; then
-            # Remove surrounding single quotes if the user added them manually
-            CLEAN="${RAW#\'}"      # remove leading '
-            CLEAN="${CLEAN%\'}"    # remove trailing '
-          
-            # Remove surrounding double quotes if present
-            CLEAN="${CLEAN#\"}"
-            CLEAN="${CLEAN%\"}"
+          if [[ -n "${{ secrets.ENABLED_USERS }}" ]]; then
+            # Take the raw secret
+            RAW="${{ secrets.ENABLED_USERS }}"
 
-            # Remove possible leading/trailing whitespace and newlines
-            CLEAN=$(echo "$CLEAN" | tr -d '\n\r' | awk '{$1=$1};1')
+            # Remove surrounding single quotes, double quotes, and whitespace/newlines
+            CLEAN="${RAW//\'/}"        # remove all single quotes
+            CLEAN="${CLEAN//\"/}"      # remove all double quotes (in case someone wrapped it as a string)
+            CLEAN="${CLEAN//[$'\t\r\n ']/}"  # remove whitespace and newlines
 
-            # Final safety net: turn the whole thing into a proper JSON string
-            ESCAPED=$(printf '%s' "$CLEAN" | jq -Rs .)
+            # Re-add the mandatory outer double quotes and properly escape everything
+            ESCAPED=$(printf '%s' "[$CLEAN]" | jq -Rs .)
 
+            # Inject it safely
             ENV_VARS=$(echo "$ENV_VARS" | jq --arg v "$ESCAPED" \
               '. += [{name: "ENABLED_USERS", value: $v}]')
           fi
 
-          # Debug line (remove after it works)
-          echo "Final ENV_VARS JSON:"
+          # Optional: see exactly what will be sent to AWS
+          echo "Final container environment variables:"
           echo "$ENV_VARS" | jq .
             
           echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
