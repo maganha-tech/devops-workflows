@@ -211,8 +211,7 @@ jobs:
             ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"}]')
           fi
           if [ -n "${{ secrets.ENABLED_USERS }}" ]; then
-            ENV_VARS=$(echo '$ENV_VARS' | jq --arg json '${{ secrets.ENABLED_USERS }}' \
-                '. += [{"name":"ENABLED_USERS", "value":$json}]') 
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"ENABLED_USERS","value":"${{ secrets.ENABLED_USERS }}"}]')
           fi
           
           echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
