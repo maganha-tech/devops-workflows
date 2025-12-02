@@ -202,7 +202,7 @@ jobs:
             ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_RPS","value":"${{ secrets.TARGET_API_RPS }}"}]')
           fi
           if [ -n "${{ secrets.TARGET_API_VERSION }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TAGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"}]')
+            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"}]')
           fi
           if [ -n "${{ secrets.ENABLE_LEAD_NOTES }}" ]; then
             ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"ENABLE_LEAD_NOTES","value":"${{ secrets.ENABLE_LEAD_NOTES }}"}]')
