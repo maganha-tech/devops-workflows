@@ -211,11 +211,29 @@ jobs:
             ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"}]')
           fi
 
-          if [ -n "${{ secrets.ENABLED_USERS }}" ]; then
-            ESCAPED_JSON=$(jq -Rs . <<< "${{ secrets.ENABLED_USERS }}")
-            ENV_VARS=$(echo "$ENV_VARS" | jq --arg v "$ESCAPED_JSON" \
-              '. += [{"name": "ENABLED_USERS", "value": $v}]')
+          RAW="${{ secrets.ENABLED_USERS }}"
+          if [ -n "$RAW" ]; then
+            # Remove surrounding single quotes if the user added them manually
+            CLEAN="${RAW#\'}"      # remove leading '
+            CLEAN="${CLEAN%\'}"    # remove trailing '
+          
+            # Remove surrounding double quotes if present
+            CLEAN="${CLEAN#\"}"
+            CLEAN="${CLEAN%\"}"
+
+            # Remove possible leading/trailing whitespace and newlines
+            CLEAN=$(echo "$CLEAN" | tr -d '\n\r' | awk '{$1=$1};1')
+
+            # Final safety net: turn the whole thing into a proper JSON string
+            ESCAPED=$(printf '%s' "$CLEAN" | jq -Rs .)
+
+            ENV_VARS=$(echo "$ENV_VARS" | jq --arg v "$ESCAPED" \
+              '. += [{name: "ENABLED_USERS", value: $v}]')
           fi
+
+          # Debug line (remove after it works)
+          echo "Final ENV_VARS JSON:"
+          echo "$ENV_VARS" | jq .
             
           echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
           echo "$ENV_VARS" >> $GITHUB_OUTPUT
