@@ -173,54 +173,54 @@ jobs:
       - name: Prepare environment variables
         id: env_vars
         run: |
+          set -euo pipefail
+
+          # Start with empty array
           ENV_VARS='[]'
 
-          # Simple secrets – safe because they never contain raw JSON
+          # Helper for normal secrets
           add() {
             local name="$1"
             local value="${2:-}"
-            [[ -n "$value" ]] && \
-              ENV_VARS=$(echo "$ENV_VARS" | jq --arg n "$name" --arg v "$value" \
-                '. += [{name: $n, value: $v}]')
+            if [ -n "$value" ]; then
+              ENV_VARS=$(jq -c --arg n "$name" --arg v "$value" \
+                '. += [{name: $n, value: $v}]' <<< "$ENV_VARS")
+            fi
           }
 
-          add "SQL_HOST"           "${{ secrets.SQL_HOST }}"
-          add "SQL_PORT"           "${{ secrets.SQL_PORT }}"
-          add "SQL_DATABASE"       "${{ secrets.SQL_DATABASE }}"
-          add "SQL_USERNAME"       "${{ secrets.SQL_USERNAME }}"
-          add "SQL_PASSWORD"       "${{ secrets.SQL_PASSWORD }}"
-          add "TARGET_API_URL"     "${{ secrets.TARGET_API_URL }}"
-          add "TARGET_API_KEY"     "${{ secrets.TARGET_API_KEY }}"
-          add "TARGET_API_RPS"     "${{ secrets.TARGET_API_RPS }}"
-          add "TARGET_API_VERSION" "${{ secrets.TARGET_API_VERSION }}"
-          add "ENABLE_LEAD_NOTES"  "${{ secrets.ENABLE_LEAD_NOTES }}"
-          add "COMPANY_ID_FIELD"   "${{ secrets.COMPANY_ID_FIELD }}"
+          # All your normal secrets
+          add SQL_HOST           "${{ secrets.SQL_HOST }}"
+          add SQL_PORT           "${{ secrets.SQL_PORT }}"
+          add SQL_DATABASE       "${{ secrets.SQL_DATABASE }}"
+          add SQL_USERNAME       "${{ secrets.SQL_USERNAME }}"
+          add SQL_PASSWORD       "${{ secrets.SQL_PASSWORD }}"
+          add TARGET_API_URL     "${{ secrets.TARGET_API_URL }}"
+          add TARGET_API_KEY     "${{ secrets.TARGET_API_KEY }}"
+          add TARGET_API_RPS     "${{ secrets.TARGET_API_RPS }}"
+          add TARGET_API_VERSION "${{ secrets.TARGET_API_VERSION }}"
+          add ENABLE_LEAD_NOTES  "${{ secrets.ENABLE_LEAD_NOTES }}"
+          add COMPANY_ID_FIELD   "${{ secrets.COMPANY_ID_FIELD }}"
 
-          # ──────────────────────────────
-          # ENABLED_USERS – the problematic one
-          # ──────────────────────────────
-          if [[ -n "${{ secrets.ENABLED_USERS }}" ]]; then
-            # Take the raw secret
+          # ENABLED_USERS – the complex JSON one
+          if [ -n "${{ secrets.ENABLED_USERS }}" ]; then
+            # Grab raw secret
             RAW="${{ secrets.ENABLED_USERS }}"
 
-            # Remove surrounding single quotes, double quotes, and whitespace/newlines
-            CLEAN="${RAW//\'/}"        # remove all single quotes
-            CLEAN="${CLEAN//\"/}"      # remove all double quotes (in case someone wrapped it as a string)
-            CLEAN="${CLEAN//[$'\t\r\n ']/}"  # remove whitespace and newlines
+            # Strip any surrounding quotes (single or double) and whitespace
+            CLEAN=$(echo "$RAW" | sed -e 's/^[[:space:]'"'"'"]*//' -e 's/[[:space:]'"'"'"]*$//')
 
-            # Re-add the mandatory outer double quotes and properly escape everything
-            ESCAPED=$(printf '%s' "[$CLEAN]" | jq -Rs .)
+            # Turn whatever is left into a properly escaped JSON string
+            ESCAPED=$(jq -Rs . <<< "$CLEAN")
 
-            # Inject it safely
-            ENV_VARS=$(echo "$ENV_VARS" | jq --arg v "$ESCAPED" \
-              '. += [{name: "ENABLED_USERS", value: $v}]')
+            # Inject it
+            ENV_VARS=$(jq -c --arg v "$ESCAPED" \
+              '. += [{name: "ENABLED_USERS", value: $v}]' <<< "$ENV_VARS")
           fi
 
-          # Optional: see exactly what will be sent to AWS
-          echo "Final container environment variables:"
-          echo "$ENV_VARS" | jq .
+          # Show you it worked (you’ll see the variable in the logs)
+          echo "Final environment variables for ECS:"
+          jq . <<< "$ENV_VARS"
 
-          # Return to the next step
           echo "ENV_VARS=$ENV_VARS" >> $GITHUB_OUTPUT
 
       - name: Get IAM role ARNs
