@@ -172,56 +172,30 @@ jobs:
 
       - name: Prepare environment variables
         id: env_vars
+        env:
+          ENABLED_USERS_JSON: ${{ secrets.ENABLED_USERS }}
         run: |
-          set -euo pipefail
+          cat <<EOF > env.json
+          [
+            ${SQL_HOST:+"{\"name\":\"SQL_HOST\",\"value\":\"${SQL_HOST}\"},"}
+            ${SQL_PORT:+"{\"name\":\"SQL_PORT\",\"value\":\"${SQL_PORT}\"},"}
+            ${SQL_DATABASE:+"{\"name\":\"SQL_DATABASE\",\"value\":\"${SQL_DATABASE}\"},"}
+            ${SQL_USERNAME:+"{\"name\":\"SQL_USERNAME\",\"value\":\"${SQL_USERNAME}\"},"}
+            ${SQL_PASSWORD:+"{\"name\":\"SQL_PASSWORD\",\"value\":\"${SQL_PASSWORD}\"},"}
+            ${TARGET_API_URL:+"{\"name\":\"TARGET_API_URL\",\"value\":\"${TARGET_API_URL}\"},"}
+            ${TARGET_API_KEY:+"{\"name\":\"TARGET_API_KEY\",\"value\":\"${TARGET_API_KEY}\"},"}
+            ${TARGET_API_RPS:+"{\"name\":\"TARGET_API_RPS\",\"value\":\"${TARGET_API_RPS}\"},"}
+            ${TARGET_API_VERSION:+"{\"name\":\"TARGET_API_VERSION\",\"value\":\"${TARGET_API_VERSION}\"},"}
+            ${ENABLE_LEAD_NOTES:+"{\"name\":\"ENABLE_LEAD_NOTES\",\"value\":\"${ENABLE_LEAD_NOTES}\"},"}
+            ${COMPANY_ID_FIELD:+"{\"name\":\"COMPANY_ID_FIELD\",\"value\":\"${COMPANY_ID_FIELD}\"},"}
+            {"name":"ENABLED_USERS","value":${ENABLED_USERS_JSON:-"[]"}}
+          ]
+          EOF
 
-          # Start with empty array
-          ENV_VARS='[]'
+          # Remove the trailing comma that bash parameter expansion leaves
+          jq 'map(select(. != null))' env.json > env-final.json
 
-          # Helper for normal secrets
-          add() {
-            local name="$1"
-            local value="${2:-}"
-            if [ -n "$value" ]; then
-              ENV_VARS=$(jq -c --arg n "$name" --arg v "$value" \
-                '. += [{name: $n, value: $v}]' <<< "$ENV_VARS")
-            fi
-          }
-
-          # All your normal secrets
-          add SQL_HOST           "${{ secrets.SQL_HOST }}"
-          add SQL_PORT           "${{ secrets.SQL_PORT }}"
-          add SQL_DATABASE       "${{ secrets.SQL_DATABASE }}"
-          add SQL_USERNAME       "${{ secrets.SQL_USERNAME }}"
-          add SQL_PASSWORD       "${{ secrets.SQL_PASSWORD }}"
-          add TARGET_API_URL     "${{ secrets.TARGET_API_URL }}"
-          add TARGET_API_KEY     "${{ secrets.TARGET_API_KEY }}"
-          add TARGET_API_RPS     "${{ secrets.TARGET_API_RPS }}"
-          add TARGET_API_VERSION "${{ secrets.TARGET_API_VERSION }}"
-          add ENABLE_LEAD_NOTES  "${{ secrets.ENABLE_LEAD_NOTES }}"
-          add COMPANY_ID_FIELD   "${{ secrets.COMPANY_ID_FIELD }}"
-
-          # ENABLED_USERS – the complex JSON one
-          if [ -n "${{ secrets.ENABLED_USERS }}" ]; then
-            # Grab raw secret
-            RAW="${{ secrets.ENABLED_USERS }}"
-
-            # Strip any surrounding quotes (single or double) and whitespace
-            CLEAN=$(echo "$RAW" | sed -e 's/^[[:space:]'"'"'"]*//' -e 's/[[:space:]'"'"'"]*$//')
-
-            # Turn whatever is left into a properly escaped JSON string
-            ESCAPED=$(jq -Rs . <<< "$CLEAN")
-
-            # Inject it
-            ENV_VARS=$(jq -c --arg v "$ESCAPED" \
-              '. += [{name: "ENABLED_USERS", value: $v}]' <<< "$ENV_VARS")
-          fi
-
-          # Show you it worked (you’ll see the variable in the logs)
-          echo "Final environment variables for ECS:"
-          jq . <<< "$ENV_VARS"
-
-          echo "ENV_VARS=$ENV_VARS" >> $GITHUB_OUTPUT
+          echo "ENV_VARS=$(cat env-final.json)" >> $GITHUB_OUTPUT
 
       - name: Get IAM role ARNs
         id: roles
