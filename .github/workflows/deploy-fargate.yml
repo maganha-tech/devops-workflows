@@ -226,8 +226,7 @@ jobs:
       - name: Register ECS task definition
         id: taskdef
         run: |
-          # Build the task definition in one clean jq call
-          TASK_DEF=$(jq -n \
+          jq -n \
             --arg family "${{ inputs.service_name }}-task" \
             --arg taskRoleArn "${{ steps.roles.outputs.TASK_ROLE_ARN }}" \
             --arg executionRoleArn "${{ steps.roles.outputs.EXECUTION_ROLE_ARN }}" \
@@ -236,7 +235,7 @@ jobs:
             --arg image "${{ env.IMAGE_URI }}" \
             --arg serviceName "${{ inputs.service_name }}" \
             --arg region "${{ secrets.AWS_REGION }}" \
-            --arg envVars '${{ steps.env_vars.outputs.ENV_VARS }}' \
+            --arg envJson '${{ steps.env_vars.outputs.ENV_VARS }}' \
             '{
               family: $family,
               taskRoleArn: $taskRoleArn,
@@ -249,8 +248,7 @@ jobs:
                 name: $serviceName,
                 image: $image,
                 essential: true,
-                ,
-                environment: ($envVars | fromjson),
+                environment: ($envJson | fromjson),
                 logConfiguration: {
                   logDriver: "awslogs",
                   options: {
@@ -261,15 +259,14 @@ jobs:
                   }
                 }
               }]
-            }')
+            }' > taskdef.json
 
-          # Save and register
-          echo "$TASK_DEF" > taskdef.json
-          aws ecs register-task-definition \
+          # Register it
+          TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.json \
-            --region ${{ secrets.AWS_REGION }} > register-output.json
-
-          TASK_DEF_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' register-output.json)
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
 
           echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
           echo "Registered task definition: $TASK_DEF_ARN"
