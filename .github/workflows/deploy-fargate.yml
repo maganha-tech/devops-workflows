@@ -226,42 +226,35 @@ jobs:
       - name: Register ECS task definition
         id: taskdef
         run: |
-          jq -n \
-            --arg family "${{ inputs.service_name }}-task" \
-            --arg taskRoleArn "${{ steps.roles.outputs.TASK_ROLE_ARN }}" \
-            --arg executionRoleArn "${{ steps.roles.outputs.EXECUTION_ROLE_ARN }}" \
-            --arg cpu "${{ inputs.task_cpu }}" \
-            --arg memory "${{ inputs.task_memory }}" \
-            --arg image "${{ env.IMAGE_URI }}" \
-            --arg serviceName "${{ inputs.service_name }}" \
-            --arg region "${{ secrets.AWS_REGION }}" \
-            --arg envJson '${{ steps.env_vars.outputs.ENV_VARS }}' \
-            '{
-              family: $family,
-              taskRoleArn: $taskRoleArn,
-              executionRoleArn: $executionRoleArn,
-              networkMode: "awsvpc",
-              requiresCompatibilities: ["FARGATE"],
-              cpu: $cpu,
-              memory: $memory,
-              containerDefinitions: [{
-                name: $serviceName,
-                image: $image,
-                essential: true,
-                environment: ($envJson | fromjson),
-                logConfiguration: {
-                  logDriver: "awslogs",
-                  options: {
-                    "awslogs-group": "/ecs/" + $serviceName,
-                    "awslogs-region": $region,
+          cat > taskdef.json <<EOF
+          {
+            "family": "${{ inputs.service_name }}-task",
+            "taskRoleArn": "${{ steps.roles.outputs.TASK_ROLE_ARN }}",
+            "executionRoleArn": "${{ steps.roles.outputs.EXECUTION_ROLE_ARN }}",
+            "networkMode": "awsvpc",
+            "requiresCompatibilities": ["FARGATE"],
+            "cpu": "${{ inputs.task_cpu }}",
+            "memory": "${{ inputs.task_memory }}",
+            "containerDefinitions": [
+              {
+                "name": "${{ inputs.service_name }}",
+                "image": "${{ env.IMAGE_URI }}",
+                "essential": true,
+                "environment": ${{ steps.env_vars.outputs.ENV_VARS }},
+                "logConfiguration": {
+                  "logDriver": "awslogs",
+                  "options": {
+                    "awslogs-group": "/ecs/${{ inputs.service_name }}",
+                    "awslogs-region": "${{ secrets.AWS_REGION }}",
                     "awslogs-stream-prefix": "ecs",
                     "awslogs-create-group": "true"
                   }
                 }
-              }]
-            }' > taskdef.json
+              }
+            ]
+          }
+          EOF
 
-          # Register it
           TASK_DEF_ARN=$(aws ecs register-task-definition \
             --cli-input-json file://taskdef.json \
             --region ${{ secrets.AWS_REGION }} \
