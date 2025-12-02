@@ -172,30 +172,28 @@ jobs:
 
       - name: Prepare environment variables
         id: env_vars
-        env:
-          ENABLED_USERS_JSON: ${{ secrets.ENABLED_USERS }}
         run: |
-          cat <<EOF > env.json
+          cat > container-env.json <<'EOF'
           [
-            ${SQL_HOST:+"{\"name\":\"SQL_HOST\",\"value\":\"${SQL_HOST}\"},"}
-            ${SQL_PORT:+"{\"name\":\"SQL_PORT\",\"value\":\"${SQL_PORT}\"},"}
-            ${SQL_DATABASE:+"{\"name\":\"SQL_DATABASE\",\"value\":\"${SQL_DATABASE}\"},"}
-            ${SQL_USERNAME:+"{\"name\":\"SQL_USERNAME\",\"value\":\"${SQL_USERNAME}\"},"}
-            ${SQL_PASSWORD:+"{\"name\":\"SQL_PASSWORD\",\"value\":\"${SQL_PASSWORD}\"},"}
-            ${TARGET_API_URL:+"{\"name\":\"TARGET_API_URL\",\"value\":\"${TARGET_API_URL}\"},"}
-            ${TARGET_API_KEY:+"{\"name\":\"TARGET_API_KEY\",\"value\":\"${TARGET_API_KEY}\"},"}
-            ${TARGET_API_RPS:+"{\"name\":\"TARGET_API_RPS\",\"value\":\"${TARGET_API_RPS}\"},"}
-            ${TARGET_API_VERSION:+"{\"name\":\"TARGET_API_VERSION\",\"value\":\"${TARGET_API_VERSION}\"},"}
-            ${ENABLE_LEAD_NOTES:+"{\"name\":\"ENABLE_LEAD_NOTES\",\"value\":\"${ENABLE_LEAD_NOTES}\"},"}
-            ${COMPANY_ID_FIELD:+"{\"name\":\"COMPANY_ID_FIELD\",\"value\":\"${COMPANY_ID_FIELD}\"},"}
-            {"name":"ENABLED_USERS","value":${ENABLED_USERS_JSON:-"[]"}}
+            {"name": "SQL_HOST",           "value": "${{ secrets.SQL_HOST }}"},
+            {"name": "SQL_PORT",           "value": "${{ secrets.SQL_PORT }}"},
+            {"name": "SQL_DATABASE",       "value": "${{ secrets.SQL_DATABASE }}"},
+            {"name": "SQL_USERNAME",       "value": "${{ secrets.SQL_USERNAME }}"},
+            {"name": "SQL_PASSWORD",       "value": "${{ secrets.SQL_PASSWORD }}"},
+            {"name": "TARGET_API_URL",     "value": "${{ secrets.TARGET_API_URL }}"},
+            {"name": "TARGET_API_KEY",     "value": "${{ secrets.TARGET_API_KEY }}"},
+            {"name": "TARGET_API_RPS",     "value": "${{ secrets.TARGET_API_RPS }}"},
+            {"name": "TARGET_API_VERSION", "value": "${{ secrets.TARGET_API_VERSION }}"},
+            {"name": "ENABLE_LEAD_NOTES",  "value": "${{ secrets.ENABLE_LEAD_NOTES }}"},
+            {"name": "COMPANY_ID_FIELD",   "value": "${{ secrets.COMPANY_ID_FIELD }}"},
+            {"name": "ENABLED_USERS",      "value": ${{ secrets.ENABLED_USERS }}}
           ]
           EOF
 
-          # Remove the trailing comma that bash parameter expansion leaves
-          jq 'map(select(. != null))' env.json > env-final.json
+          # Remove empty lines / null entries in one pass
+          jq '[.[] | select(.value != "" and .value != null)]' container-env.json > final-env.json
 
-          echo "ENV_VARS=$(cat env-final.json)" >> $GITHUB_OUTPUT
+          echo "ENV_VARS=$(cat final-env.json)" >> $GITHUB_OUTPUT
 
       - name: Get IAM role ARNs
         id: roles
