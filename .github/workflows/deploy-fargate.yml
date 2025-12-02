@@ -169,31 +169,36 @@ jobs:
           else
             echo "SECURITY_GROUPS=" >> $GITHUB_OUTPUT
           fi
-
+      
       - name: Prepare environment variables
         id: env_vars
         run: |
-          cat > container-env.json <<'EOF'
-          [
-            {"name": "SQL_HOST",           "value": "${{ secrets.SQL_HOST }}"},
-            {"name": "SQL_PORT",           "value": "${{ secrets.SQL_PORT }}"},
-            {"name": "SQL_DATABASE",       "value": "${{ secrets.SQL_DATABASE }}"},
-            {"name": "SQL_USERNAME",       "value": "${{ secrets.SQL_USERNAME }}"},
-            {"name": "SQL_PASSWORD",       "value": "${{ secrets.SQL_PASSWORD }}"},
-            {"name": "TARGET_API_URL",     "value": "${{ secrets.TARGET_API_URL }}"},
-            {"name": "TARGET_API_KEY",     "value": "${{ secrets.TARGET_API_KEY }}"},
-            {"name": "TARGET_API_RPS",     "value": "${{ secrets.TARGET_API_RPS }}"},
-            {"name": "TARGET_API_VERSION", "value": "${{ secrets.TARGET_API_VERSION }}"},
-            {"name": "ENABLE_LEAD_NOTES",  "value": "${{ secrets.ENABLE_LEAD_NOTES }}"},
-            {"name": "COMPANY_ID_FIELD",   "value": "${{ secrets.COMPANY_ID_FIELD }}"},
-            {"name": "ENABLED_USERS",      "value": ${{ secrets.ENABLED_USERS }}}
-          ]
-          EOF
+          # Create the JSON array directly with printf + GitHub’s own substitution
+          printf '%s\n' '[
+            {"name":"SQL_HOST","value":"${{ secrets.SQL_HOST }}"},
+            {"name":"SQL_PORT","value":"${{ secrets.SQL_PORT }}"},
+            {"name":"SQL_DATABASE","value":"${{ secrets.SQL_DATABASE }}"},
+            {"name":"SQL_USERNAME","value":"${{ secrets.SQL_USERNAME }}"},
+            {"name":"SQL_PASSWORD","value":"${{ secrets.SQL_PASSWORD }}"},
+            {"name":"TARGET_API_URL","value":"${{ secrets.TARGET_API_URL }}"},
+            {"name":"TARGET_API_KEY","value":"${{ secrets.TARGET_API_KEY }}"},
+            {"name":"TARGET_API_RPS","value":"${{ secrets.TARGET_API_RPS }}"},
+            {"name":"TARGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"},
+            {"name":"ENABLE_LEAD_NOTES","value":"${{ secrets.ENABLE_LEAD_NOTES }}"},
+            {"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"},
+            {"name":"ENABLED_USERS","value":${{ secrets.ENABLED_USERS }}}
+          ]' > env.json
 
-          # Remove empty lines / null entries in one pass
-          jq '[.[] | select(.value != "" and .value != null)]' container-env.json > final-env.json
+          # Remove empty entries (secrets that were not set)
+          jq 'map(select(.value != "" and .value != null))' env.json > final.json
 
-          echo "ENV_VARS=$(cat final-env.json)" >> $GITHUB_OUTPUT
+          # Output for the next step
+          echo "ENV_VARS=$(cat final.json)" >> $GITHUB_OUTPUT
+
+          # Optional: see it in the log so you know it worked
+          echo "Final ECS environment variables:"
+          cat final.json | jq .
+      
 
       - name: Get IAM role ARNs
         id: roles
