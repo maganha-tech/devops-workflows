@@ -212,7 +212,7 @@ jobs:
           fi
           if [ -n "${{ secrets.ENABLED_USERS }}" ]; then
             ESCAPED_ENABLED_USERS=$(printf '%s' "${{ secrets.ENABLED_USERS }}" | jq -R .)
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"ENABLED_USERS","value":"${{ ESCAPED_ENABLED_USERS }}"}]')
+           ENV_VARS=$(echo $ENV_VARS | jq ". += [{\"name\":\"ENABLED_USERS\",\"value\":$ESCAPED_ENABLED_USERS}]")
           fi
           
           echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
