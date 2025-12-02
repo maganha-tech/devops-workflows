@@ -170,47 +170,35 @@ jobs:
             echo "SECURITY_GROUPS=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Prepare environment variables
+            - name: Prepare environment variables
         id: env_vars
         run: |
-          # Build environment variables array
           ENV_VARS='[]'
-          
-          # Add environment variables from secrets
-          if [ -n "${{ secrets.SQL_HOST }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_HOST","value":"${{ secrets.SQL_HOST }}"}]')
-          fi
-          if [ -n "${{ secrets.SQL_PORT }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_PORT","value":"${{ secrets.SQL_PORT }}"}]')
-          fi
-          if [ -n "${{ secrets.SQL_DATABASE }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_DATABASE","value":"${{ secrets.SQL_DATABASE }}"}]')
-          fi
-          if [ -n "${{ secrets.SQL_USERNAME }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_USERNAME","value":"${{ secrets.SQL_USERNAME }}"}]')
-          fi
-          if [ -n "${{ secrets.SQL_PASSWORD }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"SQL_PASSWORD","value":"${{ secrets.SQL_PASSWORD }}"}]')
-          fi
-          if [ -n "${{ secrets.TARGET_API_URL }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_URL","value":"${{ secrets.TARGET_API_URL }}"}]')
-          fi
-          if [ -n "${{ secrets.TARGET_API_KEY }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_KEY","value":"${{ secrets.TARGET_API_KEY }}"}]')
-          fi
-          if [ -n "${{ secrets.TARGET_API_RPS }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_RPS","value":"${{ secrets.TARGET_API_RPS }}"}]')
-          fi
-          if [ -n "${{ secrets.TARGET_API_VERSION }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"TARGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"}]')
-          fi
-          if [ -n "${{ secrets.ENABLE_LEAD_NOTES }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"ENABLE_LEAD_NOTES","value":"${{ secrets.ENABLE_LEAD_NOTES }}"}]')
-          fi
-          if [ -n "${{ secrets.COMPANY_ID_FIELD }}" ]; then
-            ENV_VARS=$(echo $ENV_VARS | jq '. += [{"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"}]')
-          fi
 
+          # Simple secrets – safe because they never contain raw JSON
+          add() {
+            local name="$1"
+            local value="${2:-}"
+            [[ -n "$value" ]] && \
+              ENV_VARS=$(echo "$ENV_VARS" | jq --arg n "$name" --arg v "$value" \
+                '. += [{name: $n, value: $v}]')
+          }
+
+          add "SQL_HOST"           "${{ secrets.SQL_HOST }}"
+          add "SQL_PORT"           "${{ secrets.SQL_PORT }}"
+          add "SQL_DATABASE"       "${{ secrets.SQL_DATABASE }}"
+          add "SQL_USERNAME"       "${{ secrets.SQL_USERNAME }}"
+          add "SQL_PASSWORD"       "${{ secrets.SQL_PASSWORD }}"
+          add "TARGET_API_URL"     "${{ secrets.TARGET_API_URL }}"
+          add "TARGET_API_KEY"     "${{ secrets.TARGET_API_KEY }}"
+          add "TARGET_API_RPS"     "${{ secrets.TARGET_API_RPS }}"
+          add "TARGET_API_VERSION" "${{ secrets.TARGET_API_VERSION }}"
+          add "ENABLE_LEAD_NOTES"  "${{ secrets.ENABLE_LEAD_NOTES }}"
+          add "COMPANY_ID_FIELD"   "${{ secrets.COMPANY_ID_FIELD }}"
+
+          # ──────────────────────────────
+          # ENABLED_USERS – the problematic one
+          # ──────────────────────────────
           if [[ -n "${{ secrets.ENABLED_USERS }}" ]]; then
             # Take the raw secret
             RAW="${{ secrets.ENABLED_USERS }}"
@@ -231,10 +219,9 @@ jobs:
           # Optional: see exactly what will be sent to AWS
           echo "Final container environment variables:"
           echo "$ENV_VARS" | jq .
-            
-          echo "ENV_VARS<<EOF" >> $GITHUB_OUTPUT
-          echo "$ENV_VARS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+
+          # Return to the next step
+          echo "ENV_VARS=$ENV_VARS" >> $GITHUB_OUTPUT
 
       - name: Get IAM role ARNs
         id: roles
