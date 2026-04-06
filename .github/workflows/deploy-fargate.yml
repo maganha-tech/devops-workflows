@@ -187,7 +187,7 @@ jobs:
             {"name":"TARGET_API_VERSION","value":"${{ secrets.TARGET_API_VERSION }}"},
             {"name":"ENABLE_LEAD_NOTES","value":"${{ secrets.ENABLE_LEAD_NOTES }}"},
             {"name":"COMPANY_ID_FIELD","value":"${{ secrets.COMPANY_ID_FIELD }}"},
-            {"name":"ENABLED_USERS","value":${{ secrets.ENABLED_USERS }}}
+            {"name":"ENABLED_USERS","value":${{ secrets.ENABLED_USERS }}},
             {"name":"FORCE_FIRST_DAY_OF_MONTH","value":"${{ secrets.FORCE_FIRST_DAY_OF_MONTH }}"}
           ]' > env-raw.json
 
