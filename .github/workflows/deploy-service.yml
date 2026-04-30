@@ -13,6 +13,10 @@ on:
         required: false
         default: ""
         type: string
+      build_context:
+        required: false
+        default: "."
+        type: string
     secrets:
       AWS_REGION:
         required: true
@@ -57,7 +61,8 @@ jobs:
       - name: Build Docker image
         run: |
           docker build -f ${{ inputs.dockerfile }} \
-            -t ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} .
+            -t ${{ inputs.service_name }}:${{ steps.vars.outputs.TAG }} \
+            ${{ inputs.build_context }}
 
       - name: Tag + Push to ECR
         run: |
