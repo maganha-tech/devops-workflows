@@ -29,4 +29,4 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -f ${{ inputs.dockerfile }} -t temp-image:latest .
+          docker build -f ${{ inputs.dockerfile }} -t temp-image:latest ${{ inputs.build_context }}
