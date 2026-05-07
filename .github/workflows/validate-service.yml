@@ -6,6 +6,10 @@ on:
       dockerfile:
         required: true
         type: string
+      build_context:
+        required: false
+        default: "."
+        type: string
       tests_command:
         required: false
         default: ""
